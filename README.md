@@ -78,13 +78,17 @@ pio run -e esp32-wroom -t upload
 
 ### After Setup
 
-Access the dashboard at `http://shabbatalert.local` (or the device IP from serial monitor).
+Access the device in your browser at:
+
+> **http://shabbatalert.local/**
+
+(If mDNS is not supported on your network, use the device IP shown in the serial monitor, e.g. `http://192.168.1.xxx`)
 
 ## Web Interface
 
-- **Dashboard** (`/`): Current time, Shabbat status, upcoming alerts with date/time and countdown
-- **Settings** (`/settings`): WiFi, location, alert checkboxes (18/30/45 min), havdalah mode, ringtone
-- **Logs** (`/logs`): System logs for debugging
+- **Dashboard**: [http://shabbatalert.local/](http://shabbatalert.local/) — Current time, Shabbat status, upcoming alerts with date/time and countdown
+- **Settings**: [http://shabbatalert.local/settings](http://shabbatalert.local/settings) — WiFi, location, alert checkboxes (18/30/45 min), havdalah mode, ringtone
+- **Logs**: [http://shabbatalert.local/logs](http://shabbatalert.local/logs) — System logs for debugging
 
 ## Alert Configuration
 
