@@ -108,8 +108,12 @@ void Storage::loadCache() {
     }
     s_cache.geonameID = Storage::readInt(ADDR_GEONAMEID);
     {
+        // Uninitialised EEPROM (0xFFFFFFFF) reads as -1 here; the old `v != 0`
+        // check accepted that, sending b=-1 to Hebcal and pushing candle
+        // lighting to sunset itself.  Reject anything outside the plausible
+        // 0–60 minute range.
         int v = Storage::readInt(ADDR_CANDLE_OFFSET);
-        s_cache.candleOffset = v != 0 ? v : DEFAULT_CANDLE_OFFSET;
+        s_cache.candleOffset = (v >= 0 && v <= 60) ? v : DEFAULT_CANDLE_OFFSET;
     }
     {
         String mode = Storage::readString(ADDR_HAVDALAH_MODE, 2);
@@ -117,7 +121,9 @@ void Storage::loadCache() {
     }
     {
         int v = Storage::readInt(ADDR_HAVDALAH_MINUTES);
-        s_cache.havdalahMinutes = v != 0 ? v : DEFAULT_HAVDALAH_MINUTES;
+        // Same EEPROM-uninit guard as candle_offset; -1 here would silently
+        // send m=-1 to Hebcal when havdalah_mode is "m".
+        s_cache.havdalahMinutes = (v > 0 && v <= 180) ? v : DEFAULT_HAVDALAH_MINUTES;
     }
     {
         float v = Storage::readFloat(ADDR_HAVDALAH_DEGREES);
@@ -137,8 +143,15 @@ void Storage::loadCache() {
         s_cache.alertBeepCount = (v > 0) ? v : ALERT_BEEP_COUNT;
     }
     {
+        // CRITICAL: uninitialised EEPROM (0xFFFFFFFF) reads as UINT32_MAX
+        // here.  The old `v > 0` check accepted it, so activeDurationMs
+        // became ~49 days — updateLED's `elapsed < activeDurationMs` stayed
+        // true forever, isActive never cleared, and every subsequent alert
+        // for the rest of the boot session was silently dropped.  Cap at
+        // 60 s (way longer than any reasonable ringtone) so a bogus EEPROM
+        // value can't permanently jam the alert subsystem.
         unsigned long v = Storage::readULong(ADDR_ALERT_DURATION_MS);
-        s_cache.alertDurationMs = (v > 0) ? v : ALERT_DURATION_MS;
+        s_cache.alertDurationMs = (v > 0 && v <= 60000UL) ? v : ALERT_DURATION_MS;
     }
     {
         String v = Storage::readString(ADDR_RINGTONE, RINGTONE_MAX_LEN);
@@ -338,8 +351,9 @@ void Storage::setGeonameID(int id) {
 int Storage::getCandleOffset() { loadCache(); return s_cache.candleOffset; }
 
 void Storage::setCandleOffset(int minutes) {
-    writeInt(ADDR_CANDLE_OFFSET, minutes);
-    s_cache.candleOffset = minutes;
+    int sane = (minutes >= 0 && minutes <= 60) ? minutes : DEFAULT_CANDLE_OFFSET;
+    writeInt(ADDR_CANDLE_OFFSET, sane);
+    s_cache.candleOffset = sane;
 }
 
 String Storage::getHavdalahMode() {
@@ -370,8 +384,9 @@ void Storage::setHavdalahMode(const String& mode) {
 int Storage::getHavdalahMinutes() { loadCache(); return s_cache.havdalahMinutes; }
 
 void Storage::setHavdalahMinutes(int minutes) {
-    writeInt(ADDR_HAVDALAH_MINUTES, minutes);
-    s_cache.havdalahMinutes = minutes;
+    int sane = (minutes > 0 && minutes <= 180) ? minutes : DEFAULT_HAVDALAH_MINUTES;
+    writeInt(ADDR_HAVDALAH_MINUTES, sane);
+    s_cache.havdalahMinutes = sane;
 }
 
 float Storage::getHavdalahDegrees() { loadCache(); return s_cache.havdalahDegrees; }
@@ -412,8 +427,9 @@ void Storage::setAlertBeepCount(int count) {
 unsigned long Storage::getAlertDurationMs() { loadCache(); return s_cache.alertDurationMs; }
 
 void Storage::setAlertDurationMs(unsigned long ms) {
-    writeULong(ADDR_ALERT_DURATION_MS, ms);
-    s_cache.alertDurationMs = (ms > 0) ? ms : (unsigned long)ALERT_DURATION_MS;
+    unsigned long sane = (ms > 0 && ms <= 60000UL) ? ms : (unsigned long)ALERT_DURATION_MS;
+    writeULong(ADDR_ALERT_DURATION_MS, sane);
+    s_cache.alertDurationMs = sane;
 }
 
 String Storage::getRingtone() { loadCache(); return s_cache.ringtone; }

@@ -36,7 +36,12 @@ bool Alerts::trigger(AlertKind kind) {
     isActive = true;
     alertStartTime = millis();
     activeDurationMs = Storage::getAlertDurationMs();
-    if (activeDurationMs == 0) activeDurationMs = ALERT_DURATION_MS;
+    // Defensive clamp: a bogus storage value (e.g. uninitialised EEPROM read
+    // as UINT32_MAX) would otherwise keep isActive stuck for ~49 days,
+    // silently blocking every alert after the first one in this boot.
+    if (activeDurationMs == 0 || activeDurationMs > 60000UL) {
+        activeDurationMs = ALERT_DURATION_MS;
+    }
     LOGF("Alert triggered: %s", alertKindToString(kind));
     // Persist before kicking off audio so the EEPROM commit (~30ms) finishes
     // before the I2S DMA buffer starts being filled — no risk of mid-note glitch.
@@ -68,7 +73,11 @@ void Alerts::test() {
     isActive = true;
     alertStartTime = millis();
     activeDurationMs = Storage::getAlertDurationMs();
-    if (activeDurationMs == 0) activeDurationMs = ALERT_DURATION_MS;
+    // Same defensive clamp as trigger() — keeps the test path from
+    // hanging the alert subsystem on a corrupted storage value.
+    if (activeDurationMs == 0 || activeDurationMs > 60000UL) {
+        activeDurationMs = ALERT_DURATION_MS;
+    }
 
     String choice = Storage::getRingtone();
     if (choice == "random") {
