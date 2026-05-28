@@ -3,15 +3,9 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#ifdef BOARD_ESP8266
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
-#else
-#include <HTTPClient.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#endif
 
 struct Location {
     float latitude;

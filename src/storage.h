@@ -2,12 +2,12 @@
 #define STORAGE_H
 
 #include <Arduino.h>
-#ifdef BOARD_ESP32
-#include <Preferences.h>
-#else
 #include <EEPROM.h>
-#endif
 #include "config.h"
+
+// Forward-declared so we can persist them without a circular include with
+// hebcal_client.h.  The struct definition is in hebcal_client.h.
+struct ShabbatEvent;
 
 class Storage {
 public:
@@ -79,10 +79,26 @@ public:
     // Check if configured
     static bool isConfigured();
 
+    /** Save N scheduled events (candles + havdalahs) plus display strings. */
+    static void persistScheduleRuntimeCache(const ShabbatEvent* events, int count, const String& nextCandles, const String& nextHavdalah);
+    /** Load persisted events into `out` (up to `maxOut`).  Returns the number
+     *  of events restored, or 0 if the cache is missing/invalid.  Display
+     *  strings are populated regardless of event count. */
+    static int loadScheduleRuntimeCache(ShabbatEvent* out, int maxOut, String& nextCandles, String& nextHavdalah);
+    /** Clear persisted schedule cache (location change, Storage::clear, etc.). */
+    static void invalidateScheduleRuntimeCache();
+
+    /** Populate the in-memory cache from flash on first call.  Called automatically
+     *  from init() and lazily from getters; setters keep the cache in sync. */
+    static void loadCache();
+
+    /** Deferred-commit mode: setters update the EEPROM RAM buffer but skip the
+     *  ~30ms flash erase until endBatch().  Use around bulk writes (e.g. settings
+     *  POST) so saving 15 fields = 1 commit, not 15. */
+    static void beginBatch();
+    static void endBatch();
+
 private:
-    #ifdef BOARD_ESP32
-    static Preferences preferences;
-    #else
     static bool eepromInitialized;
     static String readString(int address, int maxLen);
     static void writeString(int address, const String& value);
@@ -94,7 +110,6 @@ private:
     static void writeULong(int address, unsigned long value);
     static bool readBool(int address);
     static void writeBool(int address, bool value);
-    #endif
 };
 
 #endif // STORAGE_H

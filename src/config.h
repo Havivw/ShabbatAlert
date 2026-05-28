@@ -1,30 +1,27 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// Hardware Pin Definitions
-#ifdef BOARD_ESP32
-  #define BUZZER_PIN 25
-  #define LED_PIN 26
-  #define OLED_SDA 21
-  #define OLED_SCL 22
-  #define RESET_BUTTON_PIN 0   // GPIO0 (boot button) or use another free GPIO
-  #define RESET_HOLD_MS     3000
-#else // ESP8266
-  // Speaker module (RX, D4, 5V, GND, D8): use D8 for signal (GPIO15). If signal is on D4 use 2; if on D5/buzzer use 14.
-  #define BUZZER_PIN 15  // D8 (GPIO15) - speaker / NoDAC pin
-  #define LED_PIN 12     // D6 on NodeMCU
-  #define OLED_SDA 4     // D2 on NodeMCU
-  #define OLED_SCL 5     // D1 on NodeMCU
-  // Physical reset: hold button (D5–GND) to clear WiFi and restart into ShabbatAlert AP
-  #define RESET_BUTTON_PIN 14  // D5 (GPIO14)
-  #define RESET_HOLD_MS     3000
-  // RTTTL audio: 1 = I2S DAC (BCK/WS/DATA), 0 = NoDAC on BUZZER_PIN
-  #define AUDIO_OUTPUT_I2S 0
-  #if AUDIO_OUTPUT_I2S
-    #define AUDIO_I2S_BCK  14
-    #define AUDIO_I2S_WS   12
-    #define AUDIO_I2S_DATA 15
-  #endif
+// Hardware Pin Definitions (ESP8266 NodeMCU v2)
+// Speaker module (RX, D4, 5V, GND, D8): use D8 for signal (GPIO15).
+#define BUZZER_PIN 15  // D8 (GPIO15) - speaker / NoDAC pin
+#define LED_PIN 12     // D6 on NodeMCU
+#define OLED_SDA 4     // D2 on NodeMCU
+#define OLED_SCL 5     // D1 on NodeMCU
+// Physical reset: hold button (D5-GND) to clear WiFi and restart into ShabbatAlert AP
+#define RESET_BUTTON_PIN 14  // D5 (GPIO14)
+#define RESET_HOLD_MS     3000
+// RGB strip: WS2812 data on D3 (NodeMCU D3 = GPIO0; if boot issues use D4/GPIO2)
+#define RGB_STRIP_PIN   0
+#define RGB_STRIP_LEN   2
+// RGB brightness levels (0-255)
+#define RGB_BRIGHTNESS_INDICATOR 60   // dimmer red/green status
+#define RGB_BRIGHTNESS_SHABBAT   180  // brighter candle flicker
+// RTTTL audio: 1 = I2S DAC (BCK/WS/DATA), 0 = NoDAC on BUZZER_PIN
+#define AUDIO_OUTPUT_I2S 0
+#if AUDIO_OUTPUT_I2S
+  #define AUDIO_I2S_BCK  14
+  #define AUDIO_I2S_WS   12
+  #define AUDIO_I2S_DATA 15
 #endif
 
 // WiFi Configuration
@@ -35,18 +32,19 @@
 #define MDNS_HOSTNAME "shabbatalert"
 
 // NTP Configuration
-#define NTP_SERVER "pool.ntp.org"
+// Three independent servers so a stuck DNS / unreachable cluster doesn't kill
+// time sync for hours.  Seen in production: pool.ntp.org alone wedged for 6
+// consecutive hourly retries until a power cycle.
+#define NTP_SERVER   "pool.ntp.org"
+#define NTP_SERVER_2 "time.google.com"
+#define NTP_SERVER_3 "time.cloudflare.com"
 #define NTP_OFFSET_SECONDS 0
 #define NTP_UPDATE_INTERVAL_MS 3600000  // 1 hour
 
 // Hebcal API Configuration
-// ESP8266: use plain HTTP (hebcal.com serves JSON on port 80 without redirect)
-// ESP32: use HTTPS (mbedTLS supports TLS 1.3)
-#ifdef BOARD_ESP8266
+// Use plain HTTP (hebcal.com serves JSON on port 80 without redirect) so we
+// avoid the heap cost of TLS on the ESP8266.
 #define HEBCAL_API_BASE "http://www.hebcal.com"
-#else
-#define HEBCAL_API_BASE "https://www.hebcal.com"
-#endif
 #define HEBCAL_TIMEOUT_MS 15000
 #define HEBCAL_CACHE_DURATION_MS 86400000  // 24 hours
 // Delay (ms) after WiFi connect before first Hebcal fetch
@@ -86,6 +84,15 @@
 #define KEY_HEBCAL_MAX_ATTEMPTS "hebcal_max_attempts"
 #define KEY_HEBCAL_PROXY_URL "hebcal_proxy_url"
 #define KEY_CANDLE_ALERTS "candle_alerts"  // bitmask: 1=18min, 2=30min, 4=45min
+// Persisted Hebcal schedule cache (survives reboot; invalidated on location change / clear)
+#define KEY_SCH_CACHE_MAGIC "sch_mag"
+#define KEY_SCH_CANDLE_UTC "sch_cutc"
+#define KEY_SCH_HAVDALAH_UTC "sch_hutc"
+#define KEY_SCH_NEXT_CANDLES "sch_nc"
+#define KEY_SCH_NEXT_HAVDALAH "sch_nh"
+// Bumped from 0x5A → 0x5B when the schedule cache went from single-pair to
+// multi-event layout.  Old caches are rejected on first boot of the new build.
+#define SCH_CACHE_MAGIC 0x5Bu
 
 // Default Values
 #define DEFAULT_CANDLE_OFFSET 18
@@ -102,8 +109,8 @@
 
 // Web Server Configuration
 #define WEB_SERVER_PORT 80
-#define MAX_LOG_ENTRIES 50
-#define LOG_BUFFER_SIZE 200
+// Uncomment to log free heap / max block every 5 minutes on Serial
+#define DEBUG_HEAP 1
 
 #endif // CONFIG_H
 

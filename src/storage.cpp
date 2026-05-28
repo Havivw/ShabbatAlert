@@ -1,220 +1,57 @@
 #include "storage.h"
+#include "hebcal_client.h"   // for ShabbatEvent struct
+#include <cmath>
 
-#ifdef BOARD_ESP32
-Preferences Storage::preferences;
+namespace {
+bool s_configCacheValid = false;
+bool s_configuredCached = false;
 
-bool Storage::init() {
-    return preferences.begin(STORAGE_NAMESPACE, false);
+// Deferred-commit batching.  When s_deferCommit is true, writeXxx() helpers
+// update the EEPROM RAM buffer but skip the flash erase; endBatch() does one
+// commit at the end.  Cuts a 15-field settings save from ~450ms to ~30ms.
+bool s_deferCommit = false;
+bool s_deferDirty = false;
+
+// In-memory cache of all settings.  Populated lazily from EEPROM/Preferences
+// and updated synchronously on every setter, so getters never re-read flash
+// (avoids dozens of small heap allocations per second under heavy polling).
+struct StorageCache {
+    bool loaded;
+    String wifiSSID;
+    String wifiPassword;
+    String cityName;
+    String timezone;
+    String ringtone;
+    String havdalahMode;
+    String hebcalProxyURL;
+    String settingsPassword;
+    String lastSchedule;
+    float latitude;
+    float longitude;
+    float havdalahDegrees;
+    int candleOffset;
+    int havdalahMinutes;
+    int candleAlerts;
+    int hebcalMaxAttempts;
+    int beepDurationMs;
+    int beepPauseMs;
+    int alertBeepCount;
+    int geonameID;
+    bool alertEnabled;
+    unsigned long alertDurationMs;
+    unsigned long lastScheduleTime;
+};
+StorageCache s_cache = {};
 }
 
-void Storage::clear() {
-    preferences.clear();
-    preferences.end();
-    preferences.begin(STORAGE_NAMESPACE, false);
+static void storageInvalidateConfigCache() {
+    s_configCacheValid = false;
 }
-
-String Storage::getWiFiSSID() {
-    if (!preferences.isKey(KEY_WIFI_SSID)) return "";
-    return preferences.getString(KEY_WIFI_SSID, "");
-}
-
-void Storage::setWiFiSSID(const String& ssid) {
-    preferences.putString(KEY_WIFI_SSID, ssid);
-}
-
-String Storage::getWiFiPassword() {
-    if (!preferences.isKey(KEY_WIFI_PASS)) return "";
-    return preferences.getString(KEY_WIFI_PASS, "");
-}
-
-void Storage::setWiFiPassword(const String& password) {
-    preferences.putString(KEY_WIFI_PASS, password);
-}
-
-String Storage::getCityName() {
-    if (!preferences.isKey(KEY_CITY_NAME)) return "";
-    return preferences.getString(KEY_CITY_NAME, "");
-}
-
-void Storage::setCityName(const String& city) {
-    preferences.putString(KEY_CITY_NAME, city);
-}
-
-float Storage::getLatitude() {
-    return preferences.getFloat(KEY_LATITUDE, 0.0);
-}
-
-void Storage::setLatitude(float lat) {
-    preferences.putFloat(KEY_LATITUDE, lat);
-}
-
-float Storage::getLongitude() {
-    return preferences.getFloat(KEY_LONGITUDE, 0.0);
-}
-
-void Storage::setLongitude(float lon) {
-    preferences.putFloat(KEY_LONGITUDE, lon);
-}
-
-String Storage::getTimezone() {
-    return preferences.getString(KEY_TIMEZONE, DEFAULT_TIMEZONE);
-}
-
-void Storage::setTimezone(const String& tz) {
-    preferences.putString(KEY_TIMEZONE, tz);
-}
-
-int Storage::getGeonameID() {
-    return preferences.getInt(KEY_GEONAMEID, 0);
-}
-
-void Storage::setGeonameID(int id) {
-    preferences.putInt(KEY_GEONAMEID, id);
-}
-
-int Storage::getCandleOffset() {
-    return preferences.getInt(KEY_CANDLE_OFFSET, DEFAULT_CANDLE_OFFSET);
-}
-
-void Storage::setCandleOffset(int minutes) {
-    preferences.putInt(KEY_CANDLE_OFFSET, minutes);
-}
-
-String Storage::getHavdalahMode() {
-    return preferences.getString(KEY_HAVDALAH_MODE, DEFAULT_HAVDALAH_MODE);
-}
-
-void Storage::setHavdalahMode(const String& mode) {
-    preferences.putString(KEY_HAVDALAH_MODE, mode);
-}
-
-int Storage::getHavdalahMinutes() {
-    return preferences.getInt(KEY_HAVDALAH_MINUTES, DEFAULT_HAVDALAH_MINUTES);
-}
-
-void Storage::setHavdalahMinutes(int minutes) {
-    preferences.putInt(KEY_HAVDALAH_MINUTES, minutes);
-}
-
-float Storage::getHavdalahDegrees() {
-    return preferences.getFloat(KEY_HAVDALAH_DEGREES, DEFAULT_HAVDALAH_DEGREES);
-}
-
-void Storage::setHavdalahDegrees(float degrees) {
-    preferences.putFloat(KEY_HAVDALAH_DEGREES, degrees);
-}
-
-bool Storage::getAlertEnabled() {
-    return preferences.getBool(KEY_ALERT_ENABLED, true);
-}
-
-void Storage::setAlertEnabled(bool enabled) {
-    preferences.putBool(KEY_ALERT_ENABLED, enabled);
-}
-
-int Storage::getBeepDurationMs() {
-    return preferences.getInt(KEY_BEEP_DURATION_MS, DEFAULT_BEEP_DURATION_MS);
-}
-
-void Storage::setBeepDurationMs(int ms) {
-    preferences.putInt(KEY_BEEP_DURATION_MS, ms);
-}
-
-int Storage::getBeepPauseMs() {
-    return preferences.getInt(KEY_BEEP_PAUSE_MS, DEFAULT_BEEP_PAUSE_MS);
-}
-
-void Storage::setBeepPauseMs(int ms) {
-    preferences.putInt(KEY_BEEP_PAUSE_MS, ms);
-}
-
-int Storage::getAlertBeepCount() {
-    return preferences.getInt(KEY_ALERT_BEEP_COUNT, ALERT_BEEP_COUNT);
-}
-
-void Storage::setAlertBeepCount(int count) {
-    preferences.putInt(KEY_ALERT_BEEP_COUNT, count);
-}
-
-unsigned long Storage::getAlertDurationMs() {
-    return preferences.getULong64(KEY_ALERT_DURATION_MS, ALERT_DURATION_MS);
-}
-
-void Storage::setAlertDurationMs(unsigned long ms) {
-    preferences.putULong64(KEY_ALERT_DURATION_MS, ms);
-}
-
-String Storage::getRingtone() {
-    return preferences.getString(KEY_RINGTONE, DEFAULT_RINGTONE);
-}
-
-void Storage::setRingtone(const String& value) {
-    preferences.putString(KEY_RINGTONE, value);
-}
-
-String Storage::getSettingsPassword() {
-    return preferences.getString(KEY_SETTINGS_PASSWORD, "");
-}
-
-void Storage::setSettingsPassword(const String& password) {
-    preferences.putString(KEY_SETTINGS_PASSWORD, password);
-}
-
-String Storage::getLastSchedule() {
-    return preferences.getString(KEY_LAST_SCHEDULE, "");
-}
-
-void Storage::setLastSchedule(const String& schedule) {
-    preferences.putString(KEY_LAST_SCHEDULE, schedule);
-}
-
-unsigned long Storage::getLastScheduleTime() {
-    return preferences.getULong64(KEY_LAST_SCHEDULE_TIME, 0);
-}
-
-void Storage::setLastScheduleTime(unsigned long time) {
-    preferences.putULong64(KEY_LAST_SCHEDULE_TIME, time);
-}
-
-int Storage::getHebcalMaxAttempts() {
-    int v = preferences.getInt(KEY_HEBCAL_MAX_ATTEMPTS, DEFAULT_HEBCAL_MAX_ATTEMPTS);
-    if (v < 1) return 1;
-    if (v > 5) return 5;
-    return v;
-}
-
-void Storage::setHebcalMaxAttempts(int attempts) {
-    if (attempts < 1) attempts = 1;
-    if (attempts > 5) attempts = 5;
-    preferences.putInt(KEY_HEBCAL_MAX_ATTEMPTS, attempts);
-}
-
-String Storage::getHebcalProxyURL() {
-    return preferences.getString(KEY_HEBCAL_PROXY_URL, "");
-}
-
-void Storage::setHebcalProxyURL(const String& url) {
-    preferences.putString(KEY_HEBCAL_PROXY_URL, url);
-}
-
-int Storage::getCandleAlerts() {
-    return preferences.getInt(KEY_CANDLE_ALERTS, DEFAULT_CANDLE_ALERTS);
-}
-
-void Storage::setCandleAlerts(int bitmask) {
-    preferences.putInt(KEY_CANDLE_ALERTS, bitmask);
-}
-
-bool Storage::isConfigured() {
-    return getWiFiSSID().length() > 0 && getLatitude() != 0.0 && getLongitude() != 0.0;
-}
-
-#else // ESP8266 - Use EEPROM
 
 bool Storage::eepromInitialized = false;
 
-// EEPROM address offsets (each string max 64 bytes, total ~512 bytes used)
-#define EEPROM_SIZE 640
+// EEPROM address offsets (expanded for persisted schedule cache)
+#define EEPROM_SIZE 1024
 #define ADDR_WIFI_SSID 0
 #define ADDR_WIFI_PASS 64
 #define ADDR_CITY_NAME 128
@@ -240,12 +77,96 @@ bool Storage::eepromInitialized = false;
 #define ADDR_HEBCAL_PROXY_URL 504
 #define HEBCAL_PROXY_URL_MAX_LEN 96
 #define ADDR_CANDLE_ALERTS 600
+// Persisted Hebcal runtime cache (multi-event layout).
+//
+//   604      magic byte (= SCH_CACHE_MAGIC)
+//   605      event count (0..SCH_MAX_PERSIST)
+//   606..    SCH_MAX_PERSIST entries × 17 bytes each
+//              per entry: 4 bytes UTC ts + 1 byte kind + 12 bytes title (NUL-padded)
+//
+// Display strings ("YYYY-MM-DD HH:MM" for next candle / next havdalah) are
+// NOT persisted — they're regenerated by the scheduler from the restored
+// events on every boot.  Saves ~60 bytes of EEPROM and keeps us safely below
+// the Diag ring buffer at addr 720.
+#define ADDR_SCH_MAGIC          604
+#define ADDR_SCH_COUNT          605
+#define ADDR_SCH_EVENTS_BASE    606
+#define SCH_EVENT_SIZE          17
+#define SCH_MAX_PERSIST         6
+// 606 + 6*17 = 708.  Diag at 720 → 12-byte safety gap.
+
+void Storage::loadCache() {
+    if (s_cache.loaded) return;
+    s_cache.wifiSSID = Storage::readString(ADDR_WIFI_SSID, 64);
+    s_cache.wifiPassword = Storage::readString(ADDR_WIFI_PASS, 64);
+    s_cache.cityName = Storage::readString(ADDR_CITY_NAME, 64);
+    s_cache.latitude = Storage::readFloat(ADDR_LATITUDE);
+    s_cache.longitude = Storage::readFloat(ADDR_LONGITUDE);
+    {
+        String tz = Storage::readString(ADDR_TIMEZONE, 64);
+        s_cache.timezone = tz.length() > 0 ? tz : String(DEFAULT_TIMEZONE);
+    }
+    s_cache.geonameID = Storage::readInt(ADDR_GEONAMEID);
+    {
+        int v = Storage::readInt(ADDR_CANDLE_OFFSET);
+        s_cache.candleOffset = v != 0 ? v : DEFAULT_CANDLE_OFFSET;
+    }
+    {
+        String mode = Storage::readString(ADDR_HAVDALAH_MODE, 2);
+        s_cache.havdalahMode = mode.length() > 0 ? mode : String(DEFAULT_HAVDALAH_MODE);
+    }
+    {
+        int v = Storage::readInt(ADDR_HAVDALAH_MINUTES);
+        s_cache.havdalahMinutes = v != 0 ? v : DEFAULT_HAVDALAH_MINUTES;
+    }
+    {
+        float v = Storage::readFloat(ADDR_HAVDALAH_DEGREES);
+        s_cache.havdalahDegrees = (v > 0.0f) ? v : DEFAULT_HAVDALAH_DEGREES;
+    }
+    s_cache.alertEnabled = Storage::readBool(ADDR_ALERT_ENABLED);
+    {
+        int v = Storage::readInt(ADDR_BEEP_DURATION_MS);
+        s_cache.beepDurationMs = (v > 0) ? v : DEFAULT_BEEP_DURATION_MS;
+    }
+    {
+        int v = Storage::readInt(ADDR_BEEP_PAUSE_MS);
+        s_cache.beepPauseMs = (v > 0) ? v : DEFAULT_BEEP_PAUSE_MS;
+    }
+    {
+        int v = Storage::readInt(ADDR_ALERT_BEEP_COUNT);
+        s_cache.alertBeepCount = (v > 0) ? v : ALERT_BEEP_COUNT;
+    }
+    {
+        unsigned long v = Storage::readULong(ADDR_ALERT_DURATION_MS);
+        s_cache.alertDurationMs = (v > 0) ? v : ALERT_DURATION_MS;
+    }
+    {
+        String v = Storage::readString(ADDR_RINGTONE, RINGTONE_MAX_LEN);
+        s_cache.ringtone = v.length() > 0 ? v : String(DEFAULT_RINGTONE);
+    }
+    s_cache.settingsPassword = Storage::readString(ADDR_SETTINGS_PASS, 64);
+    s_cache.lastSchedule = Storage::readString(ADDR_LAST_SCHEDULE, 64);
+    s_cache.lastScheduleTime = Storage::readULong(ADDR_LAST_SCHEDULE_TIME);
+    {
+        int v = Storage::readInt(ADDR_HEBCAL_MAX_ATTEMPTS);
+        s_cache.hebcalMaxAttempts = (v < 1 || v > 5) ? DEFAULT_HEBCAL_MAX_ATTEMPTS : v;
+    }
+    s_cache.hebcalProxyURL = Storage::readString(ADDR_HEBCAL_PROXY_URL, HEBCAL_PROXY_URL_MAX_LEN);
+    {
+        int v = Storage::readInt(ADDR_CANDLE_ALERTS);
+        s_cache.candleAlerts = (v > 0 && v <= 7) ? v : DEFAULT_CANDLE_ALERTS;
+    }
+    s_cache.loaded = true;
+}
 
 bool Storage::init() {
     if (!eepromInitialized) {
         EEPROM.begin(EEPROM_SIZE);
         eepromInitialized = true;
     }
+    storageInvalidateConfigCache();
+    s_cache.loaded = false;
+    loadCache();
     return true;
 }
 
@@ -254,6 +175,9 @@ void Storage::clear() {
         EEPROM.write(i, 0);
     }
     EEPROM.commit();
+    storageInvalidateConfigCache();
+    s_cache.loaded = false;
+    loadCache();
 }
 
 String Storage::readString(int address, int maxLen) {
@@ -273,7 +197,8 @@ void Storage::writeString(int address, const String& value) {
         EEPROM.write(address + i, value[i]);
     }
     EEPROM.write(address + len, 0); // Null terminator
-    EEPROM.commit();
+    if (s_deferCommit) s_deferDirty = true;
+    else EEPROM.commit();
 }
 
 float Storage::readFloat(int address) {
@@ -296,7 +221,8 @@ void Storage::writeFloat(int address, float value) {
     for (int i = 0; i < 4; i++) {
         EEPROM.write(address + i, data.b[i]);
     }
-    EEPROM.commit();
+    if (s_deferCommit) s_deferDirty = true;
+    else EEPROM.commit();
 }
 
 int Storage::readInt(int address) {
@@ -309,7 +235,8 @@ void Storage::writeInt(int address, int value) {
     EEPROM.write(address + 1, (value >> 8) & 0xFF);
     EEPROM.write(address + 2, (value >> 16) & 0xFF);
     EEPROM.write(address + 3, (value >> 24) & 0xFF);
-    EEPROM.commit();
+    if (s_deferCommit) s_deferDirty = true;
+    else EEPROM.commit();
 }
 
 unsigned long Storage::readULong(int address) {
@@ -324,7 +251,8 @@ void Storage::writeULong(int address, unsigned long value) {
     for (int i = 0; i < 4; i++) {
         EEPROM.write(address + i, (value >> (i * 8)) & 0xFF);
     }
-    EEPROM.commit();
+    if (s_deferCommit) s_deferDirty = true;
+    else EEPROM.commit();
 }
 
 bool Storage::readBool(int address) {
@@ -333,212 +261,280 @@ bool Storage::readBool(int address) {
 
 void Storage::writeBool(int address, bool value) {
     EEPROM.write(address, value ? 1 : 0);
-    EEPROM.commit();
+    if (s_deferCommit) s_deferDirty = true;
+    else EEPROM.commit();
 }
 
-// Implementation for ESP8266 (init and clear are already defined above)
-
-String Storage::getWiFiSSID() {
-    return readString(ADDR_WIFI_SSID, 64);
+void Storage::beginBatch() {
+    s_deferCommit = true;
+    s_deferDirty = false;
 }
+
+void Storage::endBatch() {
+    s_deferCommit = false;
+    if (s_deferDirty) {
+        EEPROM.commit();
+        s_deferDirty = false;
+    }
+}
+
+// Implementation for ESP8266 (init and clear are already defined above).
+// All getters return from the in-memory cache; setters keep the cache in sync.
+
+String Storage::getWiFiSSID() { loadCache(); return s_cache.wifiSSID; }
 
 void Storage::setWiFiSSID(const String& ssid) {
     writeString(ADDR_WIFI_SSID, ssid);
+    s_cache.wifiSSID = ssid;
+    storageInvalidateConfigCache();
 }
 
-String Storage::getWiFiPassword() {
-    return readString(ADDR_WIFI_PASS, 64);
-}
+String Storage::getWiFiPassword() { loadCache(); return s_cache.wifiPassword; }
 
 void Storage::setWiFiPassword(const String& password) {
     writeString(ADDR_WIFI_PASS, password);
+    s_cache.wifiPassword = password;
 }
 
-String Storage::getCityName() {
-    return readString(ADDR_CITY_NAME, 64);
-}
+String Storage::getCityName() { loadCache(); return s_cache.cityName; }
 
 void Storage::setCityName(const String& city) {
     writeString(ADDR_CITY_NAME, city);
+    s_cache.cityName = city;
 }
 
-float Storage::getLatitude() {
-    return readFloat(ADDR_LATITUDE);
-}
+float Storage::getLatitude() { loadCache(); return s_cache.latitude; }
 
 void Storage::setLatitude(float lat) {
     writeFloat(ADDR_LATITUDE, lat);
+    s_cache.latitude = lat;
+    storageInvalidateConfigCache();
+    invalidateScheduleRuntimeCache();
 }
 
-float Storage::getLongitude() {
-    return readFloat(ADDR_LONGITUDE);
-}
+float Storage::getLongitude() { loadCache(); return s_cache.longitude; }
 
 void Storage::setLongitude(float lon) {
     writeFloat(ADDR_LONGITUDE, lon);
+    s_cache.longitude = lon;
+    storageInvalidateConfigCache();
+    invalidateScheduleRuntimeCache();
 }
 
-String Storage::getTimezone() {
-    String tz = readString(ADDR_TIMEZONE, 64);
-    return tz.length() > 0 ? tz : String(DEFAULT_TIMEZONE);
-}
+String Storage::getTimezone() { loadCache(); return s_cache.timezone; }
 
 void Storage::setTimezone(const String& tz) {
     writeString(ADDR_TIMEZONE, tz);
+    s_cache.timezone = tz.length() > 0 ? tz : String(DEFAULT_TIMEZONE);
 }
 
-int Storage::getGeonameID() {
-    return readInt(ADDR_GEONAMEID);
-}
+int Storage::getGeonameID() { loadCache(); return s_cache.geonameID; }
 
 void Storage::setGeonameID(int id) {
     writeInt(ADDR_GEONAMEID, id);
+    s_cache.geonameID = id;
 }
 
-int Storage::getCandleOffset() {
-    int offset = readInt(ADDR_CANDLE_OFFSET);
-    return offset != 0 ? offset : DEFAULT_CANDLE_OFFSET;
-}
+int Storage::getCandleOffset() { loadCache(); return s_cache.candleOffset; }
 
 void Storage::setCandleOffset(int minutes) {
     writeInt(ADDR_CANDLE_OFFSET, minutes);
+    s_cache.candleOffset = minutes;
 }
 
 String Storage::getHavdalahMode() {
-    String mode = readString(ADDR_HAVDALAH_MODE, 2);
-    return mode.length() > 0 ? mode : String(DEFAULT_HAVDALAH_MODE);
+    loadCache();
+    // EEPROM slot for havdalah_mode is only 4 bytes wide (next slot is at +4),
+    // so we persist a short canonical token: "M", "m", or "d".  Translate "d"
+    // back to "degrees" for the rest of the firmware which compares against the
+    // long string in URL building and JSON serialization.  Legacy devices that
+    // had "degrees" written before this fix have a truncated "de" in EEPROM —
+    // treat that the same as "d".
+    if (s_cache.havdalahMode == "d" || s_cache.havdalahMode == "de") {
+        return String("degrees");
+    }
+    return s_cache.havdalahMode;
 }
 
 void Storage::setHavdalahMode(const String& mode) {
-    writeString(ADDR_HAVDALAH_MODE, mode);
+    // Map the long external form to a 1-char token so it fits in 4 bytes
+    // (writing "degrees" here used to silently clobber havdalah_minutes at
+    // ADDR_HAVDALAH_MODE+4).
+    String canonical = mode;
+    if (mode == "degrees") canonical = "d";
+    else if (mode.length() > 2) canonical = mode.substring(0, 1);  // belt+braces
+    writeString(ADDR_HAVDALAH_MODE, canonical);
+    s_cache.havdalahMode = canonical.length() > 0 ? canonical : String(DEFAULT_HAVDALAH_MODE);
 }
 
-int Storage::getHavdalahMinutes() {
-    int minutes = readInt(ADDR_HAVDALAH_MINUTES);
-    return minutes != 0 ? minutes : DEFAULT_HAVDALAH_MINUTES;
-}
+int Storage::getHavdalahMinutes() { loadCache(); return s_cache.havdalahMinutes; }
 
 void Storage::setHavdalahMinutes(int minutes) {
     writeInt(ADDR_HAVDALAH_MINUTES, minutes);
+    s_cache.havdalahMinutes = minutes;
 }
 
-float Storage::getHavdalahDegrees() {
-    float v = readFloat(ADDR_HAVDALAH_DEGREES);
-    return (v > 0.0f) ? v : DEFAULT_HAVDALAH_DEGREES;
-}
+float Storage::getHavdalahDegrees() { loadCache(); return s_cache.havdalahDegrees; }
 
 void Storage::setHavdalahDegrees(float degrees) {
     writeFloat(ADDR_HAVDALAH_DEGREES, degrees);
+    s_cache.havdalahDegrees = degrees;
 }
 
-bool Storage::getAlertEnabled() {
-    return readBool(ADDR_ALERT_ENABLED);
-}
+bool Storage::getAlertEnabled() { loadCache(); return s_cache.alertEnabled; }
 
 void Storage::setAlertEnabled(bool enabled) {
     writeBool(ADDR_ALERT_ENABLED, enabled);
+    s_cache.alertEnabled = enabled;
 }
 
-int Storage::getBeepDurationMs() {
-    int v = readInt(ADDR_BEEP_DURATION_MS);
-    return (v > 0) ? v : DEFAULT_BEEP_DURATION_MS;
-}
+int Storage::getBeepDurationMs() { loadCache(); return s_cache.beepDurationMs; }
 
 void Storage::setBeepDurationMs(int ms) {
     writeInt(ADDR_BEEP_DURATION_MS, ms);
+    s_cache.beepDurationMs = (ms > 0) ? ms : DEFAULT_BEEP_DURATION_MS;
 }
 
-int Storage::getBeepPauseMs() {
-    int v = readInt(ADDR_BEEP_PAUSE_MS);
-    return (v > 0) ? v : DEFAULT_BEEP_PAUSE_MS;
-}
+int Storage::getBeepPauseMs() { loadCache(); return s_cache.beepPauseMs; }
 
 void Storage::setBeepPauseMs(int ms) {
     writeInt(ADDR_BEEP_PAUSE_MS, ms);
+    s_cache.beepPauseMs = (ms > 0) ? ms : DEFAULT_BEEP_PAUSE_MS;
 }
 
-int Storage::getAlertBeepCount() {
-    int v = readInt(ADDR_ALERT_BEEP_COUNT);
-    return (v > 0) ? v : ALERT_BEEP_COUNT;
-}
+int Storage::getAlertBeepCount() { loadCache(); return s_cache.alertBeepCount; }
 
 void Storage::setAlertBeepCount(int count) {
     writeInt(ADDR_ALERT_BEEP_COUNT, count);
+    s_cache.alertBeepCount = (count > 0) ? count : ALERT_BEEP_COUNT;
 }
 
-unsigned long Storage::getAlertDurationMs() {
-    unsigned long v = readULong(ADDR_ALERT_DURATION_MS);
-    return (v > 0) ? v : ALERT_DURATION_MS;
-}
+unsigned long Storage::getAlertDurationMs() { loadCache(); return s_cache.alertDurationMs; }
 
 void Storage::setAlertDurationMs(unsigned long ms) {
     writeULong(ADDR_ALERT_DURATION_MS, ms);
+    s_cache.alertDurationMs = (ms > 0) ? ms : (unsigned long)ALERT_DURATION_MS;
 }
 
-String Storage::getRingtone() {
-    String v = readString(ADDR_RINGTONE, RINGTONE_MAX_LEN);
-    return v.length() > 0 ? v : String(DEFAULT_RINGTONE);
-}
+String Storage::getRingtone() { loadCache(); return s_cache.ringtone; }
 
 void Storage::setRingtone(const String& value) {
     writeString(ADDR_RINGTONE, value);
+    s_cache.ringtone = value.length() > 0 ? value : String(DEFAULT_RINGTONE);
 }
 
-String Storage::getSettingsPassword() {
-    return readString(ADDR_SETTINGS_PASS, 64);
-}
+String Storage::getSettingsPassword() { loadCache(); return s_cache.settingsPassword; }
 
 void Storage::setSettingsPassword(const String& password) {
     writeString(ADDR_SETTINGS_PASS, password);
+    s_cache.settingsPassword = password;
 }
 
-String Storage::getLastSchedule() {
-    return readString(ADDR_LAST_SCHEDULE, 64);
-}
+String Storage::getLastSchedule() { loadCache(); return s_cache.lastSchedule; }
 
 void Storage::setLastSchedule(const String& schedule) {
     writeString(ADDR_LAST_SCHEDULE, schedule);
+    s_cache.lastSchedule = schedule;
 }
 
-unsigned long Storage::getLastScheduleTime() {
-    return readULong(ADDR_LAST_SCHEDULE_TIME);
-}
+unsigned long Storage::getLastScheduleTime() { loadCache(); return s_cache.lastScheduleTime; }
 
 void Storage::setLastScheduleTime(unsigned long time) {
     writeULong(ADDR_LAST_SCHEDULE_TIME, time);
+    s_cache.lastScheduleTime = time;
 }
 
-int Storage::getHebcalMaxAttempts() {
-    int v = readInt(ADDR_HEBCAL_MAX_ATTEMPTS);
-    if (v < 1 || v > 5) return DEFAULT_HEBCAL_MAX_ATTEMPTS;
-    return v;
-}
+int Storage::getHebcalMaxAttempts() { loadCache(); return s_cache.hebcalMaxAttempts; }
 
 void Storage::setHebcalMaxAttempts(int attempts) {
     if (attempts < 1) attempts = 1;
     if (attempts > 5) attempts = 5;
     writeInt(ADDR_HEBCAL_MAX_ATTEMPTS, attempts);
+    s_cache.hebcalMaxAttempts = attempts;
 }
 
-String Storage::getHebcalProxyURL() {
-    return readString(ADDR_HEBCAL_PROXY_URL, HEBCAL_PROXY_URL_MAX_LEN);
-}
+String Storage::getHebcalProxyURL() { loadCache(); return s_cache.hebcalProxyURL; }
 
 void Storage::setHebcalProxyURL(const String& url) {
     writeString(ADDR_HEBCAL_PROXY_URL, url);
+    s_cache.hebcalProxyURL = url;
 }
 
-int Storage::getCandleAlerts() {
-    int v = readInt(ADDR_CANDLE_ALERTS);
-    return (v > 0 && v <= 7) ? v : DEFAULT_CANDLE_ALERTS;
-}
+int Storage::getCandleAlerts() { loadCache(); return s_cache.candleAlerts; }
 
 void Storage::setCandleAlerts(int bitmask) {
     writeInt(ADDR_CANDLE_ALERTS, bitmask);
+    s_cache.candleAlerts = (bitmask > 0 && bitmask <= 7) ? bitmask : DEFAULT_CANDLE_ALERTS;
+}
+
+void Storage::persistScheduleRuntimeCache(const ShabbatEvent* events, int count,
+                                          const String& /*nextCandles*/, const String& /*nextHavdalah*/) {
+    if (count < 0) count = 0;
+    if (count > SCH_MAX_PERSIST) count = SCH_MAX_PERSIST;
+    EEPROM.write(ADDR_SCH_MAGIC, SCH_CACHE_MAGIC);
+    EEPROM.write(ADDR_SCH_COUNT, (uint8_t)count);
+    for (int i = 0; i < count; i++) {
+        int addr = ADDR_SCH_EVENTS_BASE + i * SCH_EVENT_SIZE;
+        uint32_t ts = (uint32_t)events[i].timestamp;
+        EEPROM.write(addr + 0,  ts & 0xFF);
+        EEPROM.write(addr + 1, (ts >> 8) & 0xFF);
+        EEPROM.write(addr + 2, (ts >> 16) & 0xFF);
+        EEPROM.write(addr + 3, (ts >> 24) & 0xFF);
+        EEPROM.write(addr + 4, (uint8_t)events[i].kind);
+        // Title: up to 12 bytes, NUL-padded.
+        for (int t = 0; t < 12; t++) {
+            EEPROM.write(addr + 5 + t, (uint8_t)events[i].title[t]);
+        }
+    }
+    EEPROM.commit();
+}
+
+int Storage::loadScheduleRuntimeCache(ShabbatEvent* out, int maxOut,
+                                      String& nextCandles, String& nextHavdalah) {
+    nextCandles = "";
+    nextHavdalah = "";
+    if ((uint8_t)EEPROM.read(ADDR_SCH_MAGIC) != (uint8_t)SCH_CACHE_MAGIC) return 0;
+    int count = (int)(uint8_t)EEPROM.read(ADDR_SCH_COUNT);
+    if (count <= 0 || count > SCH_MAX_PERSIST) return 0;
+    if (count > maxOut) count = maxOut;
+    for (int i = 0; i < count; i++) {
+        int addr = ADDR_SCH_EVENTS_BASE + i * SCH_EVENT_SIZE;
+        uint32_t ts = 0;
+        ts |= ((uint32_t)EEPROM.read(addr + 0));
+        ts |= ((uint32_t)EEPROM.read(addr + 1)) << 8;
+        ts |= ((uint32_t)EEPROM.read(addr + 2)) << 16;
+        ts |= ((uint32_t)EEPROM.read(addr + 3)) << 24;
+        out[i].timestamp = (time_t)ts;
+        out[i].kind = (ShabbatKind)EEPROM.read(addr + 4);
+        for (int t = 0; t < 12; t++) {
+            out[i].title[t] = (char)EEPROM.read(addr + 5 + t);
+        }
+        // Defensive NUL — slot is 16 bytes but we only persist 12, so ensure
+        // the rest is zeroed in case caller iterates past byte 11.
+        for (int t = 12; t < 16; t++) out[i].title[t] = 0;
+    }
+    return count;
+}
+
+void Storage::invalidateScheduleRuntimeCache() {
+    EEPROM.write(ADDR_SCH_MAGIC, 0);
+    // Honour the active batch so that setLatitude/setLongitude inside a
+    // settings POST don't trigger an early flash erase that defeats the batch.
+    if (s_deferCommit) s_deferDirty = true;
+    else EEPROM.commit();
 }
 
 bool Storage::isConfigured() {
-    return getWiFiSSID().length() > 0 && getLatitude() != 0.0 && getLongitude() != 0.0;
+    if (!s_configCacheValid) {
+        float lat = getLatitude();
+        float lon = getLongitude();
+        // NaN != 0.0 evaluates true in IEEE 754, so the old check used to
+        // report a freshly-initialised device (0xFF EEPROM bytes → NaN floats)
+        // as "configured" and let refreshSchedule fire with bogus coords.
+        bool latValid = std::isfinite(lat) && lat != 0.0f;
+        bool lonValid = std::isfinite(lon) && lon != 0.0f;
+        s_configuredCached = getWiFiSSID().length() > 0 && latValid && lonValid;
+        s_configCacheValid = true;
+    }
+    return s_configuredCached;
 }
-
-#endif // BOARD_ESP32

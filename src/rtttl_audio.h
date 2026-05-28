@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 
-// RTTTL playback (ESP8266 only with ESP8266Audio). No-op on ESP32.
+// RTTTL playback via ESP8266Audio (NoDAC by default).
 class RtttlAudio {
 public:
     static void init();

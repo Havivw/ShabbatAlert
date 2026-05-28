@@ -3,11 +3,7 @@
 
 #include <Arduino.h>
 #include <time.h>
-#ifdef BOARD_ESP8266
 #include <ESP8266WiFi.h>
-#else
-#include <WiFi.h>
-#endif
 #include <sys/time.h>
 #include "config.h"
 #include "storage.h"
@@ -21,6 +17,8 @@ public:
     static String getFormattedDateTime();
     static bool isTimeSet();
     static unsigned long getMillisOffset();
+    /** Seconds to add to UTC to get local time (for formatting event timestamps). */
+    static long getTimezoneOffsetSeconds();
     /** Apply timezone from storage (call after changing timezone in settings). */
     static void applyTimezone(const String& tz);
     
@@ -28,6 +26,7 @@ private:
     static bool timeSet;
     static unsigned long millisAtSync;
     static time_t timeAtSync;
+    static long timezoneOffsetSeconds;
     static void setTimezone(const String& tz);
 };
 

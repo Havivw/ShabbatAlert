@@ -1,10 +1,6 @@
 #include "geocoding.h"
 #include "logger.h"
-#ifdef BOARD_ESP8266
 #include <ESP8266WiFi.h>
-#else
-#include <WiFi.h>
-#endif
 
 Location Geocoding::searchCity(const String& cityName) {
     return searchCityWithCountry(cityName, "");
@@ -13,38 +9,31 @@ Location Geocoding::searchCity(const String& cityName) {
 Location Geocoding::searchCityWithCountry(const String& cityName, const String& countryCode) {
     Location result;
     result.valid = false;
-    
-    #ifdef BOARD_ESP8266
+
     if (WiFi.status() != WL_CONNECTED) {
-    #else
-    if (!WiFi.isConnected()) {
-    #endif
         LOG("Cannot geocode: WiFi not connected");
         return result;
     }
-    
+
     String pathQuery = buildNominatimPath(cityName, countryCode);
     LOGF("Geocoding: https://nominatim.openstreetmap.org%s", pathQuery.c_str());
-    // Use HTTPS - Nominatim redirects HTTP to HTTPS (301), and the client does not follow redirects
-    #ifdef BOARD_ESP8266
-    // ESP8266: use host+port+path form; minimum TLS buffers (512) to fit in ~15KB free heap
+    // Nominatim redirects HTTP -> HTTPS, so we go straight to TLS.
+    // Minimum TLS buffers (512) to fit in the ESP8266's small free heap.
     WiFiClientSecure client;
     client.setInsecure();
     client.setBufferSizes(512, 512);
     HTTPClient http;
     const char* host = "nominatim.openstreetmap.org";
-    bool beginOk = http.begin(client, host, 443, pathQuery, true);
-    #else
-    WiFiClientSecure client;
-    client.setInsecure();
-    HTTPClient http;
-    String url = String("https://nominatim.openstreetmap.org") + pathQuery;
-    http.begin(client, url);
-    #endif
-    
+    http.begin(client, host, 443, pathQuery, true);
+
     http.setTimeout(15000);
     // Nominatim requires a valid User-Agent identifying the application
     http.addHeader("User-Agent", "ShabbatAlert/1.0 (ESP8266; shabbat-times-alert)");
+    // Force English responses so country names match the string checks below
+    // (e.g. "Israel" rather than localised "ישראל"/"إسرائيل" → otherwise the
+    // timezone falls through to UTC and Israel-mode detection has to lean
+    // entirely on the lat/lon fallback).
+    http.addHeader("Accept-Language", "en");
     int httpCode = http.GET();
     if (httpCode != HTTP_CODE_OK) {
         LOGF("Geocoding API error: %d", httpCode);
